@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <assert.h>
 #include "elf_exec.h"
 
@@ -138,14 +139,15 @@ void push_syscall(stream_t *s) {
 int main() {
     stream_t *s = stream_new(8);
     
+    uint8_t *data = "Hello, World!\n";
+    size_t data_len = strlen(data);
+    
     // Write
-    /*
     push_mov_r64_imm64(s, RAX, 1);  // write
     push_mov_r64_imm64(s, RDI, 1);  // stdout
-    push_mov_r64_imm64(s, RSI, 1);  // const char *buf
-    push_mov_r64_imm64(s, RDI, 1);  // len
+    push_mov_r64_imm64(s, RSI, 0x401040);  // const char *buf
+    push_mov_r64_imm64(s, RDX, data_len);  // len
     push_syscall(s);
-    */
     
     // syscal exit(123)
     push_mov_r64_imm64(s, RAX, 60);
@@ -154,6 +156,8 @@ int main() {
     
     // Output ELF file
     elf_exec_t *e = elf_exec_new(s->code, s->len);
+    elf_exec_add_text(e, s->code, s->len);
+    elf_exec_add_data(e, data, data_len);
     elf_exec_dump(e, "out.bin");
     elf_exec_destroy(e);
     
