@@ -7,10 +7,20 @@
 #define ELF_HEADER_MAXLEN               1024
 #define ELF_PROGRAM_HEADER_TABLE_MAXLEN 1024
 #define ELF_SECTION_HEADER_TABLE_MAXLEN 1024
-#define ELF_FILE_ENTRY 0x1000
-#define ELF_MEM_ENTRY  0x401000
+#define ELF_FILE_SECTIONS_OFFSET 0x1000
 
+
+/*
+ *  sections [data_section | padding to 0x1000 | text | shstrtab]
+ *  
+ *  
+ *
+ *
+ */
 typedef struct {
+    // This is where in the files the actual sections will be layed down
+    uint64_t sections_file_offset;
+    
     uint8_t  header[ELF_HEADER_MAXLEN];
     size_t   header_len;
     uint8_t  program_header_table[ELF_PROGRAM_HEADER_TABLE_MAXLEN];
@@ -23,8 +33,11 @@ typedef struct {
 
 elf_exec_t *elf_exec_new();
 void        elf_exec_destroy(elf_exec_t *e);
-void        elf_exec_add_text(elf_exec_t *e, char *buff, size_t len);
-void        elf_exec_add_data(elf_exec_t *e, char *buff, size_t len);
-void        elf_exec_dump(elf_exec_t *e, char *file_path);
+void        elf_exec_add_text(elf_exec_t *e, char *buff, size_t len,
+                                uint64_t offset, uint64_t mem_offset);
+void        elf_exec_add_data(elf_exec_t *e, char *buff, size_t len,
+                                uint64_t offset, uint64_t mem_offset);
+void        elf_exec_dump(elf_exec_t *e, char *file_path,
+                    uint64_t sections_file_offset, uint64_t entry);
 
 #endif

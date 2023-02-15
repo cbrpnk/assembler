@@ -21,14 +21,15 @@ void elf_exec_destroy(elf_exec_t *e)
     free(e);
 }
 
-void elf_exec_add_text(elf_exec_t *e, char *buff, size_t len) {
+void elf_exec_add_text(elf_exec_t *e, char *buff, size_t len,
+                                uint64_t offset, uint64_t mem_offset) {
     // .text section header
     Elf64_Shdr *shdr = (Elf64_Shdr *) &e->section_header_table[e->section_header_len];
-    shdr->sh_name = 0;
+    shdr->sh_name = 7;
     shdr->sh_type = SHT_PROGBITS;
     shdr->sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-    shdr->sh_addr = ELF_MEM_ENTRY;
-    shdr->sh_offset = ELF_FILE_ENTRY;
+    shdr->sh_addr = mem_offset + offset;
+    shdr->sh_offset = ELF_FILE_SECTIONS_OFFSET + offset;
     shdr->sh_size = len;
     shdr->sh_link = 0;
     shdr->sh_info = 0;
@@ -38,17 +39,18 @@ void elf_exec_add_text(elf_exec_t *e, char *buff, size_t len) {
     e->section_header_len += sizeof(Elf64_Shdr);
     
     // .text
-    e->sections = realloc(e->sections, e->sections_len + len);
-    memcpy(e->sections + e->sections_len, buff, len);
-    e->sections_len += len;
+    e->sections = realloc(e->sections, offset + len);
+    memcpy(e->sections + offset, buff, len);
+    e->sections_len = offset + len;;
     
     // Program header
-    Elf64_Phdr *phdr = (Elf64_Phdr *) e->program_header_table;
+    Elf64_Phdr *phdr = (Elf64_Phdr *) (e->program_header_table
+                                    + e->program_header_len);
     phdr->p_type = PT_LOAD;
     phdr->p_flags = PF_R | PF_X;
-    phdr->p_offset = ELF_FILE_ENTRY;
-    phdr->p_vaddr = ELF_MEM_ENTRY;
-    phdr->p_paddr = ELF_MEM_ENTRY;
+    phdr->p_offset = ELF_FILE_SECTIONS_OFFSET + offset;
+    phdr->p_vaddr = mem_offset + offset;
+    phdr->p_paddr = mem_offset + offset;
     phdr->p_filesz = len;
     phdr->p_memsz = len;
     phdr->p_align = 0x1000;
@@ -56,14 +58,15 @@ void elf_exec_add_text(elf_exec_t *e, char *buff, size_t len) {
     e->program_header_len += sizeof(Elf64_Phdr);
 }
 
-void elf_exec_add_data(elf_exec_t *e, char *buff, size_t len) {
+void elf_exec_add_data(elf_exec_t *e, char *buff, size_t len,
+                       uint64_t offset, uint64_t mem_offset) {
     // .data section header
     Elf64_Shdr *shdr = (Elf64_Shdr *) &e->section_header_table[e->section_header_len];
-    shdr->sh_name = 0;
+    shdr->sh_name = 1;
     shdr->sh_type = SHT_PROGBITS;
     shdr->sh_flags = SHF_ALLOC | SHF_WRITE;
-    shdr->sh_addr = ELF_MEM_ENTRY + e->sections_len;
-    shdr->sh_offset = ELF_FILE_ENTRY + e->sections_len;
+    shdr->sh_addr = mem_offset + offset;
+    shdr->sh_offset = ELF_FILE_SECTIONS_OFFSET + offset;
     shdr->sh_size = len;
     shdr->sh_link = 0;
     shdr->sh_info = 0;
@@ -72,13 +75,27 @@ void elf_exec_add_data(elf_exec_t *e, char *buff, size_t len) {
     
     e->section_header_len += sizeof(Elf64_Shdr);
     
+    // Program header
+    Elf64_Phdr *phdr = (Elf64_Phdr *) (e->program_header_table
+                                    + e->program_header_len);
+    phdr->p_type = PT_LOAD;
+    phdr->p_flags = PF_R;
+    phdr->p_offset = ELF_FILE_SECTIONS_OFFSET + offset;
+    phdr->p_vaddr = mem_offset + offset;
+    phdr->p_paddr = mem_offset + offset;
+    phdr->p_filesz = len;
+    phdr->p_memsz = len;
+    phdr->p_align = 0x1000;
+    
+    e->program_header_len += sizeof(Elf64_Phdr);
+    
     // section
-    e->sections = realloc(e->sections, e->sections_len + len);
-    memcpy(e->sections + e->sections_len, buff, len);
-    e->sections_len += len;
+    e->sections = realloc(e->sections, offset + len);
+    memcpy(e->sections + offset, buff, len);
+    e->sections_len = offset + len;
 }
 
-void gen_header(elf_exec_t *e) {
+void gen_header(elf_exec_t *e, uint64_t entry) {
     // Header
     Elf64_Ehdr *hdr = (Elf64_Ehdr *) e->header;
     hdr->e_ident[EI_MAG0] = ELFMAG0;
@@ -93,13 +110,13 @@ void gen_header(elf_exec_t *e) {
     hdr->e_type = ET_EXEC;
     hdr->e_machine = EM_X86_64;
     hdr->e_version = EV_CURRENT;
-    hdr->e_entry = 0x401000;
+    hdr->e_entry = entry;
     hdr->e_phoff = sizeof(Elf64_Ehdr);
     hdr->e_shoff = sizeof(Elf64_Ehdr) + e->program_header_len;
     hdr->e_flags = 0x0;
     hdr->e_ehsize = 0x40;
     hdr->e_phentsize = 0x38;
-    hdr->e_phnum = 0x01;        // TODO Hardcoded
+    hdr->e_phnum = 0x02;        // TODO Hardcoded
     hdr->e_shentsize = 0x40;
     hdr->e_shnum = 0x04;        // TODO Hardcoded
     hdr->e_shstrndx = 0x03;     // TODO Hardcoded
@@ -108,19 +125,19 @@ void gen_header(elf_exec_t *e) {
 }
 
 void gen_shstrtab(elf_exec_t *e) {
-    char symtable[100] = ".text\0.data\0.shstrtab";
-    size_t symtable_len = 16;
+    char symtable[100] = "\0.data\0.text\0.shstrtab";
+    size_t symtable_len = 22;
     
     Elf64_Shdr *shdr = (Elf64_Shdr *) &e->section_header_table[e->section_header_len];
-    shdr->sh_name = 6;
+    shdr->sh_name = 13;
     shdr->sh_type = SHT_STRTAB;
     shdr->sh_flags = 0;
     shdr->sh_addr = 0;
-    shdr->sh_offset = ELF_FILE_ENTRY + e->sections_len;
+    shdr->sh_offset = ELF_FILE_SECTIONS_OFFSET + e->sections_len;
     shdr->sh_size = symtable_len;
     shdr->sh_link = 0;
     shdr->sh_info = 0;
-    shdr->sh_addralign = 4;
+    shdr->sh_addralign = 1;
     shdr->sh_entsize = 0;
 
     e->section_header_len += sizeof(Elf64_Shdr);
@@ -131,15 +148,16 @@ void gen_shstrtab(elf_exec_t *e) {
     e->sections_len += symtable_len;
 }
 
-void elf_exec_dump(elf_exec_t *e, char *file_path)
+void elf_exec_dump(elf_exec_t *e, char *file_path,
+                    uint64_t sections_file_offset, uint64_t entry)
 {
     // Generate
     //gen_program_header(e);
     gen_shstrtab(e);
-    gen_header(e);
+    gen_header(e, entry);
     
     // Calculate total file size
-    size_t total_file_len = ELF_FILE_ENTRY + e->sections_len;
+    size_t total_file_len =  ELF_FILE_SECTIONS_OFFSET + e->sections_len;
     uint8_t *output_buf = calloc(1, total_file_len);
     uint8_t *cursor = output_buf;
     
@@ -156,7 +174,7 @@ void elf_exec_dump(elf_exec_t *e, char *file_path)
     cursor += e->section_header_len;
     
     // Sections
-    cursor = output_buf + ELF_FILE_ENTRY;
+    cursor = output_buf + ELF_FILE_SECTIONS_OFFSET;
     memcpy(cursor, e->sections, e->sections_len);
     
     FILE *f = fopen(file_path, "wb");

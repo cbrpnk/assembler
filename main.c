@@ -135,17 +135,30 @@ void push_syscall(stream_t *s) {
     stream_push16(s, 0x050f);
 }
 
-////////////////////////////////////////////////////////////////////////////////////////
+typedef struct {
+    
+} instruction_t;
+
+////////////////////////////////////////////////////////////////////////
 int main() {
     stream_t *s = stream_new(8);
     
+    // TODO
+    // - Set text section offset
+    // - Compute text section length
+    // - From that compute data section offest
+    
     uint8_t *data = "Hello, World!\n";
-    size_t data_len = strlen(data);
+    size_t data_len = strlen(data)+1;
+    
+    uint64_t mem_offset = 0x400000;
+    uint64_t data_offset = 0;
+    uint64_t text_offset = 0x1000;
     
     // Write
     push_mov_r64_imm64(s, RAX, 1);  // write
     push_mov_r64_imm64(s, RDI, 1);  // stdout
-    push_mov_r64_imm64(s, RSI, 0x401040);  // const char *buf
+    push_mov_r64_imm64(s, RSI, mem_offset + data_offset);  // const char *buf
     push_mov_r64_imm64(s, RDX, data_len);  // len
     push_syscall(s);
     
@@ -156,9 +169,9 @@ int main() {
     
     // Output ELF file
     elf_exec_t *e = elf_exec_new(s->code, s->len);
-    elf_exec_add_text(e, s->code, s->len);
-    elf_exec_add_data(e, data, data_len);
-    elf_exec_dump(e, "out.bin");
+    elf_exec_add_data(e, data, data_len, data_offset, mem_offset);
+    elf_exec_add_text(e, s->code, s->len, text_offset, mem_offset);
+    elf_exec_dump(e, "out.bin", data_offset, mem_offset + text_offset);
     elf_exec_destroy(e);
     
     // Cleanup
