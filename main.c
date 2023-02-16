@@ -114,67 +114,151 @@ void stream_push64(stream_t *s, uint64_t val)
 }
 
 /////////////////////////////// Instructions parts ////////////////////////////////////////////
-void push_rex(stream_t *s, uint8_t w, uint8_t  r, uint8_t x, uint8_t b) {
+void push_rex(stream_t *s, uint8_t w, uint8_t  r, uint8_t x, uint8_t b)
+{
     stream_push8(s, 0x40 | (w<<3) | (r<<2) | (x<<1) | b);
 }
 
 /////////////////////////////// Instructions ////////////////////////////////////////////////
-void push_add_rax_imm32(stream_t *s, uint32_t imm32) {
+void push_add_rax_imm32(stream_t *s, uint32_t imm32)
+{
     push_rex(s, 1, 0, 0, 0);
     stream_push8(s, 0x05);
     stream_push32(s, imm32);
 }
 
-void push_mov_r64_imm64(stream_t *s, uint8_t reg, uint64_t imm64) {
+void push_mov_r64_imm64(stream_t *s, uint8_t reg, uint64_t imm64)
+{
     push_rex(s, 1, 0, 0, (reg & 0x08) >> 3);
     stream_push8(s, 0xb8 | (reg & 0x07));
     stream_push64(s, imm64);
 }
 
-void push_syscall(stream_t *s) {
+void push_syscall(stream_t *s)
+{
     stream_push16(s, 0x050f);
 }
 
 typedef struct {
+    char names[100][255];
+    uint64_t addrs[100];
+    size_t count;
+} symtable_t;
+
+uint64_t symtable_get(symtable_t *s, const char *name)
+{
+    for(int i=0; i<=s->count; ++i) {
+        if(strcmp(name, s->names[i]) == 0) return s->addrs[i];
+    }
     
+    return 0;
+}
+
+typedef struct {
+    uint64_t offset;
+    uint8_t *buffer;
+    uint64_t len;
+    uint64_t cap;
+} segment_t;
+
+uint64_t seg_alloc(segment_t *s, size_t len)
+{
+    // Resize buffer if can't fit len bytes in
+    if(s->cap == 0) {
+        s->cap = len;
+        s->buffer = realloc(s->buffer, s->cap);
+    } else if((s->cap - s->len)  < len) {
+        s->cap *= 2;
+        s->buffer = realloc(s->buffer, s->cap);
+    }
+    
+    uint64_t new_ptr = s->len;
+    s->len += len;
+    
+    return new_ptr;
+}
+
+void seg_write_str(segment_t *seg, symtable_t *symtable, const char *name, const char *str, size_t str_len) {
+    uint64_t msg = seg_alloc(seg, str_len);
+    strcpy(seg->buffer + msg, str);
+    
+    memcpy(symtable->names[1], name, strlen(name));
+    symtable->addrs[1] = seg->offset + msg;
+    symtable->count++;
+    
+}
+
+typedef enum {
+    OP_MOV_R64_IMM64,
+    OP_SYSCALL
+} opcode_t;
+
+typedef struct {
+    opcode_t opcode;
+    uint64_t operand1;
+    uint64_t operand2;
 } instruction_t;
 
 ////////////////////////////////////////////////////////////////////////
-int main() {
-    stream_t *s = stream_new(8);
-    
-    // TODO
-    // - Set text section offset
-    // - Compute text section length
-    // - From that compute data section offest
-    
-    uint8_t *data = "Hello, World!\n";
-    size_t data_len = strlen(data)+1;
-    
+int main()
+{
     uint64_t mem_offset = 0x400000;
     uint64_t data_offset = 0;
     uint64_t text_offset = 0x1000;
     
-    // Write
-    push_mov_r64_imm64(s, RAX, 1);  // write
-    push_mov_r64_imm64(s, RDI, 1);  // stdout
-    push_mov_r64_imm64(s, RSI, mem_offset + data_offset);  // const char *buf
-    push_mov_r64_imm64(s, RDX, data_len);  // len
-    push_syscall(s);
+    segment_t seg_data = {
+        .offset = mem_offset + data_offset,
+        .buffer = NULL,
+        .len = 0,
+        .cap = 0
+    };
     
-    // syscal exit(123)
-    push_mov_r64_imm64(s, RAX, 60);
-    push_mov_r64_imm64(s, RDI, 123);
-    push_syscall(s);
+    symtable_t symtable = {0};
+    
+    // Populate data segment
+    seg_write_str(&seg_data, &symtable, "msg", "This is the poop!!!\n", 21);
+    
+    // Program
+    instruction_t program[] = {
+        // Write mmsg
+        { .opcode = OP_MOV_R64_IMM64, .operand1 = RAX, .operand2 = 1 },
+        { .opcode = OP_MOV_R64_IMM64, .operand1 = RDI, .operand2 = 1 },
+        { .opcode = OP_MOV_R64_IMM64, .operand1 = RSI, .operand2 = symtable_get(&symtable, "msg") },
+        { .opcode = OP_MOV_R64_IMM64, .operand1 = RDX, .operand2 = 21 },
+        { .opcode = OP_SYSCALL, .operand1 = 0, .operand2 = 0 },
+        
+        // EXIT(123)
+        { .opcode = OP_MOV_R64_IMM64, .operand1 = RAX, .operand2 = 60 },
+        { .opcode = OP_MOV_R64_IMM64, .operand1 = RDI, .operand2 = 123 },
+        { .opcode = OP_SYSCALL, .operand1 = 0, .operand2 = 0 },
+    };
+    
+    // Encode instructions
+    stream_t *s = stream_new(8);
+    
+    for(int i=0; i<sizeof(program)/sizeof(instruction_t); ++i) {
+        switch(program[i].opcode) {
+        case OP_MOV_R64_IMM64:
+            push_mov_r64_imm64(s, program[i].operand1, program[i].operand2);
+            break;
+        case OP_SYSCALL:
+            push_syscall(s);
+            break;
+        default:
+            printf("Error: unknown instruction\n");
+            exit(1);
+        }
+    }
     
     // Output ELF file
     elf_exec_t *e = elf_exec_new(s->code, s->len);
-    elf_exec_add_data(e, data, data_len, data_offset, mem_offset);
+    elf_exec_add_data(e, seg_data.buffer, seg_data.len, data_offset, mem_offset);
     elf_exec_add_text(e, s->code, s->len, text_offset, mem_offset);
     elf_exec_dump(e, "out.bin", data_offset, mem_offset + text_offset);
     elf_exec_destroy(e);
     
     // Cleanup
+    free(seg_data.buffer);
     stream_destroy(s);
     return 0;
 }
