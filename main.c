@@ -178,14 +178,13 @@ uint64_t seg_alloc(segment_t *s, size_t len)
     return new_ptr;
 }
 
-void seg_write_str(segment_t *seg, symtable_t *symtable, const char *name, const char *str, size_t str_len) {
-    uint64_t msg = seg_alloc(seg, str_len);
-    strcpy(seg->buffer + msg, str);
+void seg_copy(segment_t *seg, symtable_t *symtable, const char *name, void *buf, size_t len) {
+    uint64_t offset = seg_alloc(seg, len);
+    memcpy(seg->buffer + offset, buf, len);
     
     memcpy(symtable->names[1], name, strlen(name));
-    symtable->addrs[1] = seg->offset + msg;
+    symtable->addrs[1] = seg->offset + offset;
     symtable->count++;
-    
 }
 
 typedef enum {
@@ -215,8 +214,8 @@ int main()
     
     symtable_t symtable = {0};
     
-    // Populate data segment
-    seg_write_str(&seg_data, &symtable, "msg", "This is the poop!!!\n", 21);
+    // Populate data segment with symbol
+    seg_copy(&seg_data, &symtable, "msg", "This is the poop!!!\n", 21);
     
     // Program
     instruction_t program[] = {
